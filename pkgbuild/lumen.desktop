@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Lumen
+Comment=Control your motherboard, keyboard, and microphone lighting
+Exec=lumen open
+Icon=lumen
+Terminal=false
+Categories=Utility;Settings;HardwareSettings;
+Keywords=rgb;lights;led;gigabyte;fusion;logitech;keyboard;microphone;
+StartupWMClass=lumen

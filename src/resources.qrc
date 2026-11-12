@@ -1,0 +1,11 @@
+<RCC>
+    <qresource prefix="/">
+        <file alias="Main.qml">Main.qml</file>
+        <file alias="SectionLabel.qml">SectionLabel.qml</file>
+        <file alias="HueStrip.qml">HueStrip.qml</file>
+        <file alias="StripPreview.qml">StripPreview.qml</file>
+        <file alias="ShortcutsOverlay.qml">ShortcutsOverlay.qml</file>
+        <file alias="EffectChip.qml">EffectChip.qml</file>
+        <file alias="i18n/en.json">i18n/en.json</file>
+    </qresource>
+</RCC>
