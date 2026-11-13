@@ -6,9 +6,9 @@ import QtQuick.Layouts
 ApplicationWindow {
     id: win
     width: 520
-    height: 800
+    height: 880
     minimumWidth: 460
-    minimumHeight: 720
+    minimumHeight: 800
     visible: true
     title: "Lumen"
     color: "#0e0e10"
@@ -122,6 +122,18 @@ ApplicationWindow {
                     checked: lighting.on
                     onToggled: lighting.on = checked
                     text: lighting.on ? qsTr("On") : qsTr("Off")
+                }
+            }
+
+            // Wireless device batteries (the mouse), so it's clear when to charge.
+            Repeater {
+                model: batteries.devices
+                delegate: BatteryCard {
+                    required property var modelData
+                    Layout.fillWidth: true
+                    device: modelData
+                    accent: theme.accent
+                    radius: Math.min(6, theme.radius)
                 }
             }
 

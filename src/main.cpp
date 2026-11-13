@@ -8,6 +8,7 @@
 #include <QQuickStyle>
 #include <QUrl>
 
+#include "battery.h"
 #include "cli.h"
 #include "lighting.h"
 #include "theme.h"
@@ -16,7 +17,7 @@
 static int openWindow(int argc, char *argv[]) {
     QGuiApplication app(argc, argv);
     app.setApplicationName("lumen");
-    app.setApplicationVersion("0.2.0");
+    app.setApplicationVersion("0.3.0");
 
     // Matches the window to lumen.desktop, so the compositor (Wayland app_id)
     // and the launcher pick up the installed icon.
@@ -34,12 +35,14 @@ static int openWindow(int argc, char *argv[]) {
     Lighting lighting;
     lighting.setLive(true);
     QObject::connect(&theme, &Theme::changed, &lighting, &Lighting::refreshTheme);
+    BatteryMonitor batteries;
 
     QQmlApplicationEngine engine;
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
     engine.rootContext()->setContextProperty("translator", &translator);
     engine.rootContext()->setContextProperty("theme", &theme);
     engine.rootContext()->setContextProperty("lighting", &lighting);
+    engine.rootContext()->setContextProperty("batteries", &batteries);
     engine.load(QUrl("qrc:/Main.qml"));
     if (engine.rootObjects().isEmpty())
         return 1;

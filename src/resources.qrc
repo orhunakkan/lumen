@@ -6,6 +6,7 @@
         <file alias="StripPreview.qml">StripPreview.qml</file>
         <file alias="ShortcutsOverlay.qml">ShortcutsOverlay.qml</file>
         <file alias="EffectChip.qml">EffectChip.qml</file>
+        <file alias="BatteryCard.qml">BatteryCard.qml</file>
         <file alias="i18n/en.json">i18n/en.json</file>
     </qresource>
 </RCC>

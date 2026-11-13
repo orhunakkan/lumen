@@ -1,11 +1,12 @@
-pkgname=lumen
-pkgver=0.2.0
+pkgname=lumen-rgb
+pkgver=0.3.0
 pkgrel=1
 pkgdesc="Control RGB lighting on a Gigabyte RGB Fusion 2.0 motherboard and Logitech G515 and Yeti Orb"
 arch=('x86_64' 'aarch64')
 license=('MIT')
-depends=('qt6-base' 'qt6-declarative' 'qt6-wayland' 'liquidctl' 'solaar')
+depends=('qt6-base' 'qt6-declarative' 'qt6-wayland' 'liquidctl' 'solaar' 'libnotify' 'jq')
 makedepends=('gcc' 'make')
+conflicts=('lumen')
 source=()
 sha256sums=()
 
@@ -20,4 +21,6 @@ package() {
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 "$startdir/lumen.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/lumen.svg"
   install -Dm644 "$startdir/lumen.desktop" "$pkgdir/usr/share/applications/lumen.desktop"
+  install -Dm644 "$startdir/lumen-battery.service" "$pkgdir/usr/lib/systemd/user/lumen-battery.service"
+  install -Dm644 "$startdir/lumen-battery.timer" "$pkgdir/usr/lib/systemd/user/lumen-battery.timer"
 }

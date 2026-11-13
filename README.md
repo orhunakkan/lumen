@@ -3,7 +3,9 @@
 ![Lumen](docs/screenshot.png)
 
 Lumen controls RGB lighting on Linux from one small app: a motherboard LED
-strip, a Logitech keyboard, and a Logitech microphone. It has a window, a
+strip, a Logitech keyboard, and a Logitech microphone. It also shows the
+battery of wireless devices such as a Logitech mouse, in the window and the
+Omarchy bar, and warns before it runs out. It has a window, a
 command line, and Omarchy hooks. The lights follow the Omarchy theme: switch
 themes and they change with it, and they come back after a reboot.
 
@@ -20,6 +22,7 @@ launcher.
 - [Using the command line](#using-the-command-line)
 - [Effects](#effects)
 - [Following the theme](#following-the-theme)
+- [Mouse battery](#mouse-battery)
 - [After a reboot](#after-a-reboot)
 - [How it works](#how-it-works)
 - [Files](#files)
@@ -60,6 +63,8 @@ Superlight 2, have nothing to control.
 - **Restore after boot**, since the devices forget their colors when power is
   lost.
 - **Keyboard driven:** every control has a shortcut, and `?` lists them.
+- **Mouse battery** in the window and the Omarchy bar, with a notification
+  when it's low.
 - **Scriptable:** every command takes `--json` and exits 1 with the reason on
   stderr when something fails.
 - **No root:** udev rules from liquidctl and Solaar give the desktop user
@@ -83,8 +88,9 @@ omarchy pkg add liquidctl solaar      # or: sudo pacman -S liquidctl solaar
   access to Logitech devices. Lumen doesn't run Solaar, and Solaar doesn't
   start at login.
 
-Building also needs `qt6-base`, `qt6-declarative`, `qt6-wayland`, `gcc` and
-`make`, which Omarchy already includes.
+The battery features also use `libnotify` (`notify-send`) and `jq`. Building
+needs `qt6-base`, `qt6-declarative`, `qt6-wayland`, `gcc` and `make`. Omarchy
+already includes all of these.
 
 ### 2. Build and install
 
@@ -112,6 +118,15 @@ This adds two scripts to Omarchy's hook directories:
 
 `lumen hooks uninstall` removes them. Both scripts do nothing if Lumen has
 been uninstalled.
+
+### 4. Battery alerts and bar widget (optional)
+
+```sh
+lumen battery alerts on   # notify when the mouse battery is low
+lumen battery bar on      # show it in the Omarchy bar
+```
+
+See [Mouse battery](#mouse-battery).
 
 ## Using the window
 
@@ -168,6 +183,11 @@ lumen <command> [--device board|keyboard|mic] [options]
 | `lumen apply --init` | The same, initializing the motherboard controller first |
 | `lumen release` | Hand Logitech lighting back to the device firmware |
 | `lumen hooks install` / `uninstall` | Add or remove the Omarchy hooks |
+| `lumen battery` | Show wireless device batteries |
+| `lumen battery --bar` | The same, as JSON for an Omarchy bar module |
+| `lumen battery check` | Notify if a battery just went low (what the alert timer runs) |
+| `lumen battery alerts on` / `off` | Turn low-battery notifications on or off |
+| `lumen battery bar on` / `off` | Add the battery to the Omarchy bar, or take it off |
 | `lumen help` | Show usage |
 
 **Choosing devices.** Without `--device`, a command changes every device.
@@ -255,6 +275,55 @@ during boot.
 A device that's unplugged and plugged back in also returns to its own lighting
 until the next `lumen apply` or change from Lumen.
 
+## Mouse battery
+
+Logitech's kernel driver reports the battery of each paired wireless device
+in `/sys/class/power_supply/hidpp_battery_N`. Lumen reads that, so it needs
+no access to the device and sends it nothing. Any device with a battery shows
+up: today a PRO X Superlight 2 mouse, tomorrow a wireless keyboard or headset.
+A laptop's own battery is left to Omarchy.
+
+```console
+$ lumen battery
+Logitech PRO X 2: 54%, discharging
+```
+
+**In the window**, a card at the top shows each device's charge as a bar,
+refreshed every 30 seconds:
+
+| Level | Bar | Says |
+| --- | --- | --- |
+| Above 20% | Accent color | On battery |
+| 20% and below | Amber | Charge it soon |
+| 10% and below | Red | Charge it now |
+| Charging | Accent color | Charging |
+| Asleep or off | Empty | Not connected |
+
+**In the Omarchy bar**, `lumen battery bar on` adds a command module to
+`~/.config/omarchy/shell.json`, just before the Bluetooth icon:
+
+```json
+{ "id": "lumen.battery", "type": "command", "exec": "lumen battery --bar",
+  "interval": 60, "tooltip": "Mouse battery", "onClick": "lumen open" }
+```
+
+It shows a mouse icon and the percentage (a charging icon while charging),
+turns the accent color at 20% and below, opens Lumen when clicked, and hides
+while the mouse sleeps. The edit goes through `jq`, so the rest of the file
+keeps its order and formatting, and `lumen battery bar off` takes it out
+again, leaving the file as it was.
+
+**Notifications.** `lumen battery alerts on` enables a systemd user timer
+(`lumen-battery.timer`, shipped with the package) that runs
+`lumen battery check` two minutes after login and every five minutes after
+that. It sends a desktop notification once when a battery drops to 15%, and a
+critical one at 5%. Charging the device resets it, so the next drop is
+announced again. What's been announced is kept in
+`~/.local/state/lumen/battery-alerts.json`.
+
+The kernel updates the level whenever the device reports it, which a
+sleeping mouse doesn't do; the last known level stays until it wakes.
+
 ## How it works
 
 ```text
@@ -336,6 +405,9 @@ the profiles that hold actuation points and rapid trigger stay untouched.
 | `~/.config/lumen/state.json` | Saved state, one entry per device |
 | `~/.config/omarchy/hooks/theme-set.d/50-lumen` | Theme hook (`lumen hooks install`) |
 | `~/.config/omarchy/hooks/post-boot.d/50-lumen` | Boot hook (`lumen hooks install`) |
+| `~/.config/omarchy/shell.json` | Holds the bar module, when `lumen battery bar on` |
+| `~/.local/state/lumen/battery-alerts.json` | Which low-battery alerts were sent |
+| `/usr/lib/systemd/user/lumen-battery.{service,timer}` | The alert timer |
 | `/usr/bin/lumen` | The app |
 | `/usr/share/applications/lumen.desktop` | Launcher entry |
 
@@ -387,11 +459,13 @@ bin/test     # Qt Test, offscreen
 bin/install  # makepkg -fsi from pkgbuild/
 ```
 
-The tests run offscreen against a fake `liquidctl` script and an empty sysfs
-(`LUMEN_HIDRAW_ROOT`), so they never touch real devices or your settings. They
+The tests run offscreen against a fake `liquidctl` script, a fake
+`notify-send`, and fake sysfs trees (`LUMEN_HIDRAW_ROOT`,
+`LUMEN_POWER_SUPPLY_ROOT`), so they never touch real devices or your
+settings. They
 cover state, migration, effect fallbacks, liquidctl arguments and retries,
-HID++ descriptor matching and parameter layouts, the CLI, the hooks, the theme
-and the translator.
+HID++ descriptor matching and parameter layouts, batteries and alerts, the bar
+module edit, the CLI, the hooks, the theme and the translator.
 
 ### Layout
 
@@ -402,6 +476,7 @@ src/main.cpp          `lumen open` starts the window; anything else is a command
 src/cli.{h,cpp}       the command line and the hook scripts
 src/lighting.{h,cpp}  device catalog, saved state, applying it to each device
 src/hidpp.{h,cpp}     HID++ 2.0 and RGB EFFECTS (0x8071) over hidraw
+src/battery.{h,cpp}   wireless device batteries from /sys/class/power_supply
 src/theme.{h,cpp}     follows the Omarchy theme: accent, lighting color, palette, rounding
 src/translator.{h,cpp} follows the Omarchy language
 src/*.qml             the window

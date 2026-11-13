@@ -2,11 +2,14 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QJsonObject>
+#include <QStandardPaths>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "battery.h"
 #include "cli.h"
 #include "hidpp.h"
 #include "lighting.h"
@@ -22,6 +25,7 @@ private slots:
         // No test may reach the real keyboard or microphone.
         QVERIFY(m_noDevices.isValid());
         qputenv("LUMEN_HIDRAW_ROOT", m_noDevices.path().toUtf8());
+        qputenv("LUMEN_POWER_SUPPLY_ROOT", m_noDevices.path().toUtf8());
     }
 
     void brightnessScalesTheColor()
@@ -304,6 +308,117 @@ private slots:
         QCOMPARE(f.calls().size(), before);
     }
 
+    void batteriesAreReadFromTheKernel()
+    {
+        QTemporaryDir sys;
+        powerSupply(sys.path(), "hidpp_battery_0", "PRO X 2", "Logitech", "Device", "54", "Discharging", "1");
+        powerSupply(sys.path(), "hidpp_battery_1", "G915", "Logitech", "Device", "80", "Discharging", "0");
+        // A laptop's own battery belongs to Omarchy, not Lumen.
+        powerSupply(sys.path(), "BAT0", "Laptop", "", "System", "90", "Charging", "");
+        const QList<BatteryInfo> batteries = Batteries::read(sys.path());
+        QCOMPARE(batteries.size(), 2);
+        QCOMPARE(batteries[0].displayName(), QString("Logitech PRO X 2"));
+        QCOMPARE(batteries[0].capacity, 54);
+        QVERIFY(batteries[0].online);
+        QVERIFY(!batteries[1].online);
+    }
+
+    void theBarShowsConnectedBatteriesAndFlagsLowOnes()
+    {
+        BatteryInfo mouse;
+        mouse.name = "PRO X 2";
+        mouse.manufacturer = "Logitech";
+        mouse.status = "Discharging";
+        mouse.online = true;
+        mouse.capacity = 54;
+        QJsonObject out = Batteries::barOutput({mouse});
+        QVERIFY(out.value("text").toString().endsWith("54%"));
+        QVERIFY(!out.contains("class"));
+
+        mouse.capacity = 18;
+        QCOMPARE(Batteries::barOutput({mouse}).value("class").toString(), QString("active"));
+        // Charging isn't a warning, however low.
+        mouse.status = "Charging";
+        QVERIFY(!Batteries::barOutput({mouse}).contains("class"));
+
+        // Asleep: nothing on the bar, which hides the widget.
+        mouse.online = false;
+        QVERIFY(Batteries::barOutput({mouse}).value("text").toString().isEmpty());
+        QVERIFY(Batteries::barOutput({}).value("text").toString().isEmpty());
+    }
+
+    void alertsFireOncePerDropAndResetOnCharge()
+    {
+        BatteryInfo mouse;
+        mouse.name = "PRO X 2";
+        mouse.status = "Discharging";
+        mouse.online = true;
+        QString title, body;
+        auto check = [&](int capacity, int last) {
+            title.clear();
+            mouse.capacity = capacity;
+            return Batteries::alertLevel(mouse, last, &title, &body);
+        };
+        QCOMPARE(check(50, 0), 0);
+        QVERIFY(title.isEmpty());
+        QCOMPARE(check(15, 0), int(Batteries::kAlert));
+        QVERIFY(title.contains("low"));
+        QVERIFY(body.contains("15%"));
+        QCOMPARE(check(12, Batteries::kAlert), int(Batteries::kAlert));
+        QVERIFY(title.isEmpty());
+        QCOMPARE(check(5, Batteries::kAlert), int(Batteries::kAlertCritical));
+        QVERIFY(title.contains("critical"));
+        QCOMPARE(check(3, Batteries::kAlertCritical), int(Batteries::kAlertCritical));
+        QVERIFY(title.isEmpty());
+        mouse.status = "Charging";
+        QCOMPARE(check(4, Batteries::kAlertCritical), 0);
+        QVERIFY(title.isEmpty());
+    }
+
+    void checkNotifiesOnceThroughNotifySend()
+    {
+        QTemporaryDir dir;
+        powerSupply(dir.path() + "/sys", "hidpp_battery_0", "PRO X 2", "Logitech", "Device", "12", "Discharging", "1");
+        QDir(dir.path()).mkpath("bin");
+        write(dir.path() + "/bin/notify-send", ("#!/bin/sh\necho \"$*\" >> '" + dir.path() + "/notified'\n").toUtf8());
+        QFile::setPermissions(dir.path() + "/bin/notify-send", QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        const QByteArray path = qgetenv("PATH");
+        qputenv("PATH", dir.path().toUtf8() + "/bin:" + path);
+        qputenv("LUMEN_POWER_SUPPLY_ROOT", (dir.path() + "/sys").toUtf8());
+
+        QCOMPARE(Cli::checkBatteries(dir.path() + "/state/alerts.json", true), 0);
+        QCOMPARE(Cli::checkBatteries(dir.path() + "/state/alerts.json", true), 0);
+
+        qputenv("PATH", path);
+        qputenv("LUMEN_POWER_SUPPLY_ROOT", m_noDevices.path().toUtf8());
+        const QStringList notified = QString::fromUtf8(readAll(dir.path() + "/notified")).split('\n', Qt::SkipEmptyParts);
+        QCOMPARE(notified.size(), 1);
+        QVERIFY(notified.first().contains("PRO X 2 battery low"));
+    }
+
+    void theBarWidgetIsAddedOnceAndRemovedCleanly()
+    {
+        if (QStandardPaths::findExecutable("jq").isEmpty())
+            QSKIP("jq isn't installed");
+        QTemporaryDir dir;
+        const QString shell = dir.path() + "/shell.json";
+        const QByteArray original =
+            "{\n  \"bar\": {\n    \"layout\": {\n      \"right\": [\n        {\n          \"id\": \"omarchy.tray\"\n        },\n"
+            "        {\n          \"id\": \"omarchy.bluetooth\"\n        }\n      ]\n    }\n  },\n  \"version\": 1\n}\n";
+        write(shell, original);
+        QString error;
+        QVERIFY(Cli::setBarWidget(shell, true, &error));
+        QVERIFY(Cli::setBarWidget(shell, true, &error));
+        const QJsonArray right = QJsonDocument::fromJson(readAll(shell)).object()
+                                     .value("bar").toObject().value("layout").toObject().value("right").toArray();
+        QCOMPARE(right.size(), 3);
+        QCOMPARE(right[1].toObject().value("id").toString(), QString("lumen.battery"));
+        QCOMPARE(right[1].toObject().value("exec").toString(), QString("lumen battery --bar"));
+        QVERIFY(Cli::setBarWidget(shell, false, &error));
+        QCOMPARE(readAll(shell), original);
+        QVERIFY(!Cli::setBarWidget(dir.path() + "/missing.json", true, &error));
+    }
+
     void hooksInstallAndUninstall()
     {
         QTemporaryDir dir;
@@ -430,6 +545,21 @@ private:
     };
 
     QTemporaryDir m_noDevices;
+
+    static void powerSupply(const QString &root, const QString &node, const QByteArray &model, const QByteArray &maker,
+                            const QByteArray &scope, const QByteArray &capacity, const QByteArray &status,
+                            const QByteArray &online)
+    {
+        const QString dir = root + "/" + node;
+        QDir().mkpath(dir);
+        write(dir + "/type", "Battery\n");
+        write(dir + "/scope", scope + "\n");
+        write(dir + "/model_name", model + "\n");
+        if (!maker.isEmpty()) write(dir + "/manufacturer", maker + "\n");
+        write(dir + "/capacity", capacity + "\n");
+        write(dir + "/status", status + "\n");
+        if (!online.isEmpty()) write(dir + "/online", online + "\n");
+    }
 
     static QByteArray readAll(const QString &path)
     {

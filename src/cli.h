@@ -20,4 +20,10 @@ bool installHooks(const QString &hooksDirectory, QString *error);
 bool uninstallHooks(const QString &hooksDirectory, QString *error);
 QStringList hookPaths(const QString &hooksDirectory);
 
+// Adds or removes Lumen's mouse battery module in the Omarchy bar layout.
+bool setBarWidget(const QString &shellJson, bool on, QString *error);
+// Sends a notification for each battery that just went low or critical, and
+// remembers it in statePath so the same drop isn't announced twice.
+int checkBatteries(const QString &statePath, bool quiet);
+
 }

@@ -1,0 +1,6 @@
+[Unit]
+Description=Lumen: notify when a wireless device battery is low
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/lumen battery check --quiet

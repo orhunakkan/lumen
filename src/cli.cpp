@@ -1,5 +1,6 @@
 #include "cli.h"
 
+#include "battery.h"
 #include "lighting.h"
 
 #include <QDir>
@@ -8,6 +9,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QProcess>
+#include <QStandardPaths>
 #include <QSaveFile>
 #include <QTextStream>
 
@@ -41,6 +44,25 @@ const char *kBootHook =
     "# cold boot, so put the saved ones back once the desktop is up.\n"
     "command -v lumen >/dev/null 2>&1 && lumen apply --init --quiet\n"
     "exit 0\n";
+
+// The bar module Lumen adds: the mouse battery, refreshed every minute,
+// opening Lumen when clicked.
+const char *kBarModuleId = "lumen.battery";
+
+QString shellConfigPath() {
+    return qEnvironmentVariable("LUMEN_SHELL_JSON", QDir::homePath() + "/.config/omarchy/shell.json");
+}
+
+QString alertStatePath() {
+    const QString base = qEnvironmentVariable("XDG_STATE_HOME", QDir::homePath() + "/.local/state");
+    return base + "/lumen/battery-alerts.json";
+}
+
+QString describeBattery(const BatteryInfo &b) {
+    if (!b.online || b.capacity < 0)
+        return "not connected";
+    return QString("%1%, %2").arg(b.capacity).arg(b.status.toLower());
+}
 
 QString describe(const Lighting &lighting, const QString &id) {
     const LightState state = lighting.state(id);
@@ -82,9 +104,88 @@ QString Cli::usage() {
         "  release                    Hand Logitech lighting back to the device firmware\n"
         "  hooks install|uninstall    Follow theme changes and restore after boot\n"
         "\n"
+        "  battery                    Show wireless device batteries (the mouse)\n"
+        "  battery --bar              The same, as JSON for an Omarchy bar module\n"
+        "  battery check              Notify if a battery is low (run by the alert timer)\n"
+        "  battery alerts on|off      Low-battery notifications, checked every 5 minutes\n"
+        "  battery bar on|off         Show the mouse battery in the Omarchy bar\n"
+        "\n"
         "Without --device, a command changes every device. --device takes a\n"
         "comma-separated list and can repeat.\n"
         "Options: --json for machine-readable output, --quiet for none.\n");
+}
+
+bool Cli::setBarWidget(const QString &shellJson, bool on, QString *error) {
+    if (!QFileInfo::exists(shellJson)) {
+        *error = QString("%1 doesn't exist, so there's no bar layout to add to.").arg(shellJson);
+        return false;
+    }
+    const QString jq = QStandardPaths::findExecutable("jq");
+    if (jq.isEmpty()) {
+        *error = "jq isn't installed; Lumen uses it to edit the bar layout without reformatting it.";
+        return false;
+    }
+    // jq keeps the file's key order and layout, so only the one entry changes.
+    const QString module = QString(R"({"id":"%1","type":"command","exec":"lumen battery --bar",)"
+                                   R"("interval":60,"tooltip":"Mouse battery","onClick":"lumen open"})").arg(kBarModuleId);
+    const QString filter = on
+        ? QString(R"(if (.bar.layout.right | type) != "array" then error("no bar.layout.right in shell.json")
+                     elif any(.bar.layout[][]; .id == $id) then .
+                     else (.bar.layout.right | map(.id) | index("omarchy.bluetooth")) as $i
+                          | .bar.layout.right |= (if $i == null then . + [$m] else .[:$i] + [$m] + .[$i:] end)
+                     end)")
+        : QString(R"(if (.bar.layout | type) != "object" then .
+                     else .bar.layout |= with_entries(.value |= (if type == "array" then map(select(.id != $id)) else . end))
+                     end)");
+    QProcess process;
+    process.start(jq, {"--arg", "id", kBarModuleId, "--argjson", "m", module, filter, shellJson});
+    if (!process.waitForFinished(10000) || process.exitCode() != 0) {
+        *error = "Couldn't edit " + shellJson + ": " + QString::fromUtf8(process.readAllStandardError()).trimmed();
+        return false;
+    }
+    const QByteArray updated = process.readAllStandardOutput();
+    QFile current(shellJson);
+    if (current.open(QIODevice::ReadOnly) && current.readAll() == updated)
+        return true;  // already as asked
+    current.close();
+    // The shell reloads shell.json when it changes; write it in one step.
+    QSaveFile file(shellJson);
+    if (!file.open(QIODevice::WriteOnly) || file.write(updated) < 0 || !file.commit()) {
+        *error = QString("Couldn't write %1: %2").arg(shellJson, file.errorString());
+        return false;
+    }
+    return true;
+}
+
+int Cli::checkBatteries(const QString &statePath, bool quiet) {
+    QFile file(statePath);
+    QJsonObject last;
+    if (file.open(QIODevice::ReadOnly))
+        last = QJsonDocument::fromJson(file.readAll()).object();
+    file.close();
+
+    QJsonObject next;
+    for (const BatteryInfo &b : Batteries::read()) {
+        QString title, body;
+        const int level = Batteries::alertLevel(b, last.value(b.node).toInt(0), &title, &body);
+        if (level)
+            next.insert(b.node, level);
+        if (title.isEmpty())
+            continue;
+        const QString urgency = level == Batteries::kAlertCritical ? "critical" : "normal";
+        QProcess::execute("notify-send", {"--app-name=Lumen", "--icon=input-mouse", "--urgency=" + urgency, title, body});
+        if (!quiet)
+            out() << title << ": " << body << "\n";
+    }
+    if (next != last) {
+        QDir().mkpath(QFileInfo(statePath).absolutePath());
+        QSaveFile save(statePath);
+        if (save.open(QIODevice::WriteOnly)) {
+            save.write(QJsonDocument(next).toJson(QJsonDocument::Compact));
+            save.commit();
+        }
+    }
+    return 0;
 }
 
 QStringList Cli::hookPaths(const QString &hooksDirectory) {
@@ -178,7 +279,7 @@ int Cli::run(const QStringList &arguments, const QString &statePath, const QStri
         return command.isEmpty() ? 1 : 0;
     }
     if (command == "--version" || command == "version") {
-        out() << "lumen 0.2.0\n";
+        out() << "lumen 0.3.0\n";
         return 0;
     }
 
@@ -196,6 +297,54 @@ int Cli::run(const QStringList &arguments, const QString &statePath, const QStri
         else if (!quiet)
             out() << (value == "install" ? "Installed " : "Removed ") << paths.join(" and ") << "\n";
         return 0;
+    }
+
+    if (command == "battery") {
+        const bool barOutput = args.removeAll("--bar") > 0;
+        const QString action = args.value(1), state = args.value(2);
+        if (action.isEmpty()) {
+            const QList<BatteryInfo> batteries = Batteries::read();
+            if (barOutput) {
+                out() << QJsonDocument(Batteries::barOutput(batteries)).toJson(QJsonDocument::Compact) << "\n";
+            } else if (json) {
+                QJsonArray list;
+                for (const BatteryInfo &b : batteries)
+                    list << b.toJson();
+                out() << QJsonDocument(QJsonObject{{"ok", true}, {"batteries", list}}).toJson(QJsonDocument::Compact) << "\n";
+            } else if (!quiet) {
+                if (batteries.isEmpty())
+                    out() << "No wireless device reports a battery.\n";
+                for (const BatteryInfo &b : batteries)
+                    out() << b.displayName() << ": " << describeBattery(b) << "\n";
+            }
+            return 0;
+        }
+        if (action == "check")
+            return checkBatteries(alertStatePath(), quiet);
+        if ((action == "alerts" || action == "bar") && state != "on" && state != "off")
+            return fail(QString("Use `lumen battery %1 on` or `lumen battery %1 off`.").arg(action));
+        if (action == "alerts") {
+            // The timer and its service ship with the package.
+            const QStringList systemctl = state == "on" ? QStringList{"--user", "enable", "--now", "lumen-battery.timer"}
+                                                        : QStringList{"--user", "disable", "--now", "lumen-battery.timer"};
+            QProcess process;
+            process.start("systemctl", systemctl);
+            if (!process.waitForFinished(15000) || process.exitCode() != 0)
+                return fail("systemctl failed: " + QString::fromUtf8(process.readAllStandardError()).trimmed());
+            if (!quiet)
+                out() << (state == "on" ? "Low-battery alerts are on: checked every 5 minutes, at 15% and 5%.\n"
+                                        : "Low-battery alerts are off.\n");
+            return 0;
+        }
+        if (action == "bar") {
+            QString error;
+            if (!setBarWidget(shellConfigPath(), state == "on", &error))
+                return fail(error);
+            if (!quiet)
+                out() << (state == "on" ? "The mouse battery is on the bar.\n" : "The mouse battery is off the bar.\n");
+            return 0;
+        }
+        return fail(QString("Unknown battery command \"%1\". Run `lumen help`.").arg(action));
     }
 
     Lighting lighting(statePath, themeDirectory, liquidctl);

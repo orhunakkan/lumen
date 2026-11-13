@@ -5,6 +5,7 @@ TARGET = lumen
 TEMPLATE = app
 
 HEADERS += \
+    src/battery.h \
     src/cli.h \
     src/hidpp.h \
     src/lighting.h \
@@ -13,6 +14,7 @@ HEADERS += \
 
 SOURCES += \
     src/main.cpp \
+    src/battery.cpp \
     src/cli.cpp \
     src/hidpp.cpp \
     src/lighting.cpp \
