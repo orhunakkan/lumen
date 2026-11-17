@@ -343,8 +343,13 @@ private slots:
 
         // Asleep: nothing on the bar, which hides the widget.
         mouse.online = false;
+        // Asleep or absent: no output at all, which hides the widget. Empty
+        // JSON wouldn't: the bar shows raw output when the text is empty.
         QVERIFY(Batteries::barOutput({mouse}).value("text").toString().isEmpty());
-        QVERIFY(Batteries::barOutput({}).value("text").toString().isEmpty());
+        QVERIFY(Batteries::barLine({mouse}).isEmpty());
+        QVERIFY(Batteries::barLine({}).isEmpty());
+        mouse.online = true;
+        QVERIFY(Batteries::barLine({mouse}).contains("18%"));
     }
 
     void alertsFireOncePerDropAndResetOnCharge()

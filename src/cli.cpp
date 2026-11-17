@@ -279,7 +279,7 @@ int Cli::run(const QStringList &arguments, const QString &statePath, const QStri
         return command.isEmpty() ? 1 : 0;
     }
     if (command == "--version" || command == "version") {
-        out() << "lumen 0.3.0\n";
+        out() << "lumen 0.3.1\n";
         return 0;
     }
 
@@ -305,7 +305,9 @@ int Cli::run(const QStringList &arguments, const QString &statePath, const QStri
         if (action.isEmpty()) {
             const QList<BatteryInfo> batteries = Batteries::read();
             if (barOutput) {
-                out() << QJsonDocument(Batteries::barOutput(batteries)).toJson(QJsonDocument::Compact) << "\n";
+                const QString line = Batteries::barLine(batteries);
+                if (!line.isEmpty())
+                    out() << line << "\n";
             } else if (json) {
                 QJsonArray list;
                 for (const BatteryInfo &b : batteries)

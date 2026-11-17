@@ -41,6 +41,10 @@ QString defaultRoot();
 
 // Waybar-style JSON for an Omarchy bar command module.
 QJsonObject barOutput(const QList<BatteryInfo> &batteries);
+// The line the bar module prints: the JSON above, or nothing at all while no
+// device is connected. The bar shows a command's raw output when its JSON
+// has an empty text, so hiding the widget takes empty output, not empty JSON.
+QString barLine(const QList<BatteryInfo> &batteries);
 
 // What the alert timer should say for this reading, given what it said last
 // time for this device (0 = nothing, kAlert, kAlertCritical). Returns the new

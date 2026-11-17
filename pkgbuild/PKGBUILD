@@ -1,5 +1,5 @@
 pkgname=lumen-rgb
-pkgver=0.3.0
+pkgver=0.3.1
 pkgrel=1
 pkgdesc="Control RGB lighting on a Gigabyte RGB Fusion 2.0 motherboard and Logitech G515 and Yeti Orb"
 arch=('x86_64' 'aarch64')

@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QStringList>
 
 namespace {
@@ -82,11 +83,17 @@ QJsonObject Batteries::barOutput(const QList<BatteryInfo> &batteries) {
         tooltip << QString("%1: %2%, %3").arg(b.displayName()).arg(b.capacity).arg(b.status.toLower());
         low = low || (b.capacity <= kLow && !b.charging());
     }
-    // An empty text hides the widget while nothing is connected.
     QJsonObject out{{"text", parts.join("  ")}, {"tooltip", tooltip.join('\n')}};
     if (low)
         out.insert("class", "active");
     return out;
+}
+
+QString Batteries::barLine(const QList<BatteryInfo> &batteries) {
+    const QJsonObject out = barOutput(batteries);
+    if (out.value("text").toString().isEmpty())
+        return {};
+    return QString::fromUtf8(QJsonDocument(out).toJson(QJsonDocument::Compact));
 }
 
 int Batteries::alertLevel(const BatteryInfo &b, int lastLevel, QString *title, QString *body) {
