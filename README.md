@@ -272,6 +272,13 @@ desktop starts, which initializes the motherboard controller and puts every
 device's saved state back. Expect the default lighting for a few seconds
 during boot.
 
+Suspend does the same to the motherboard controller: it wakes on its own
+default lighting and quietly ignores writes until it's initialized again.
+Omarchy has no resume hook, so the package ships a user service,
+`lumen-resume.service`, that watches logind's `PrepareForSleep` signal and
+runs `lumen apply --init` when the machine wakes. `lumen hooks install`
+enables it and `lumen hooks uninstall` disables it.
+
 A device that's unplugged and plugged back in also returns to its own lighting
 until the next `lumen apply` or change from Lumen.
 
@@ -408,6 +415,7 @@ the profiles that hold actuation points and rapid trigger stay untouched.
 | `~/.config/omarchy/shell.json` | Holds the bar module, when `lumen battery bar on` |
 | `~/.local/state/lumen/battery-alerts.json` | Which low-battery alerts were sent |
 | `/usr/lib/systemd/user/lumen-battery.{service,timer}` | The alert timer |
+| `/usr/lib/systemd/user/lumen-resume.service`, `/usr/lib/lumen/lumen-resume` | Restores the lights after suspend |
 | `/usr/bin/lumen` | The app |
 | `/usr/share/applications/lumen.desktop` | Launcher entry |
 
@@ -441,8 +449,11 @@ and replug it, or reboot. For Logitech devices, make sure Solaar is installed.
 (`G515`, `Yeti Orb`). Check that it's in
 `grep HID_NAME /sys/class/hidraw/*/device/uevent`.
 
-**Lights are back to default after sleep or replugging**: run `lumen apply`.
-A device that loses power forgets its lighting.
+**Lights are back to default after sleep or replugging**: run
+`lumen apply --init`. A device that loses power forgets its lighting. After
+suspend this should happen by itself; check that
+`systemctl --user status lumen-resume.service` is active, and run
+`lumen hooks install` if it isn't.
 
 **The keyboard backlight doesn't dim when idle**: under software control, the
 keyboard's own idle dimming is off. `lumen release` restores it, and the

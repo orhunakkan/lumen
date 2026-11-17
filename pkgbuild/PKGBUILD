@@ -1,5 +1,5 @@
 pkgname=lumen-rgb
-pkgver=0.3.1
+pkgver=0.3.2
 pkgrel=1
 pkgdesc="Control RGB lighting on a Gigabyte RGB Fusion 2.0 motherboard and Logitech G515 and Yeti Orb"
 arch=('x86_64' 'aarch64')
@@ -23,4 +23,6 @@ package() {
   install -Dm644 "$startdir/lumen.desktop" "$pkgdir/usr/share/applications/lumen.desktop"
   install -Dm644 "$startdir/lumen-battery.service" "$pkgdir/usr/lib/systemd/user/lumen-battery.service"
   install -Dm644 "$startdir/lumen-battery.timer" "$pkgdir/usr/lib/systemd/user/lumen-battery.timer"
+  install -Dm755 "$startdir/lumen-resume" "$pkgdir/usr/lib/lumen/lumen-resume"
+  install -Dm644 "$startdir/lumen-resume.service" "$pkgdir/usr/lib/systemd/user/lumen-resume.service"
 }

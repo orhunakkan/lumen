@@ -1,0 +1,17 @@
+#!/bin/bash
+# The RGB Fusion controller comes back from suspend on its own default
+# lighting, and keeps accepting writes without showing them until it is
+# initialized again. Watch logind for the end of a sleep and put the saved
+# state back, initializing the controller first.
+
+dbus-monitor --system \
+  "type='signal',sender='org.freedesktop.login1',interface='org.freedesktop.login1.Manager',member='PrepareForSleep'" |
+  while IFS= read -r line; do
+    # PrepareForSleep(true) fires going down, (false) on the way back up.
+    [[ $line == *"boolean false"* ]] || continue
+    # USB devices take a moment to come back; try a few times.
+    for _ in 1 2 3 4 5; do
+      sleep 2
+      lumen apply --init --quiet && break
+    done
+  done

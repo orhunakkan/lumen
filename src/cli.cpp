@@ -102,7 +102,7 @@ QString Cli::usage() {
         "  theme [on|off]             Follow the Omarchy theme's color (default: on)\n"
         "  apply [--init]             Put the saved state back on the devices\n"
         "  release                    Hand Logitech lighting back to the device firmware\n"
-        "  hooks install|uninstall    Follow theme changes and restore after boot\n"
+        "  hooks install|uninstall    Follow theme changes, restore after boot and suspend\n"
         "\n"
         "  battery                    Show wireless device batteries (the mouse)\n"
         "  battery --bar              The same, as JSON for an Omarchy bar module\n"
@@ -279,7 +279,7 @@ int Cli::run(const QStringList &arguments, const QString &statePath, const QStri
         return command.isEmpty() ? 1 : 0;
     }
     if (command == "--version" || command == "version") {
-        out() << "lumen 0.3.1\n";
+        out() << "lumen 0.3.2\n";
         return 0;
     }
 
@@ -290,6 +290,13 @@ int Cli::run(const QStringList &arguments, const QString &statePath, const QStri
             : value == "uninstall" ? !uninstallHooks(directory, &error)
             : (error = "Use `lumen hooks install` or `lumen hooks uninstall`.", true))
             return fail(error);
+        // Omarchy has no resume hook, so the package ships a user service that
+        // watches logind and restores the lights after suspend.
+        QProcess systemctl;
+        systemctl.start("systemctl", {"--user", value == "install" ? "enable" : "disable", "--now",
+                                      "lumen-resume.service"});
+        if (!systemctl.waitForFinished(15000) || systemctl.exitCode() != 0)
+            return fail("systemctl failed: " + QString::fromUtf8(systemctl.readAllStandardError()).trimmed());
         const QStringList paths = hookPaths(directory);
         if (json)
             out() << QJsonDocument(QJsonObject{{"ok", true}, {"hooks", QJsonArray::fromStringList(paths)}})

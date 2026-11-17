@@ -1,0 +1,14 @@
+[Unit]
+Description=Lumen: put the saved lighting back after resume from suspend
+After=dbus.socket graphical-session.target
+Requires=dbus.socket
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/lumen/lumen-resume
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target
